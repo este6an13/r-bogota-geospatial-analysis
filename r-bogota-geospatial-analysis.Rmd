@@ -1,0 +1,142 @@
+---
+title: "Bogotá D.C. Spatial Analysis"
+output: html_document
+date: "2023-06-08"
+---
+
+### Diego Esteban Quintero Rey
+### Ingeniería de Sistemas y Computación
+### Introducción a la Biología Computacional, 2023-I
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+1. You have a .shp file called localidades_BOGOTA_DC.shp as a part of this tutorial. This file is the limit of the localities of Bogota DC. 1) Read this file using the function of the package rgdal to read .shp files, name this object as LOCALIDADES. 2) Read the raster SRTM_30_BOGOTA_DC_CLIP.tif, name this raster SRTM_30. 3) The standard deviation (sd) is considered a measure of the variation data; it means that higher sd of altitude (SRTM_30) suggests higher topographic variability. You must mask the SRTM_30 by each locality (LOCALIDADES) to estimate the sd of SRTM_30 by locality. What is the locality with the highest topographic variability? Note: You can use a loop or not, you decide.
+
+```{r}
+#install.packages("sp")
+#install.packages("rgdal")
+#install.packages("raster")
+#install.packages("dismo")
+#install.packages("rgeos")
+#install.packages("car")
+
+rm(list = ls(all.names = TRUE)) 
+gc()
+
+library("sp")
+library("rgdal")
+library("raster")
+library("dismo")
+library("rgeos")
+library("car")
+```
+
+1) Read this file using the function of the package rgdal to read .shp files, name this object as LOCALIDADES.
+
+```{r}
+# reads the shapefile into a SpatialPolygonsDataFrame object called LOCALIDADES
+LOCALIDADES = readOGR(dsn = "data", layer = "localidades_BOGOTA_DC")
+
+# calculates the centroids of each locality
+CENTROIDS = gCentroid(LOCALIDADES, byid=T)
+
+# plots the LOCALIDADES polygons
+plot(LOCALIDADES)
+
+# adds the CENTROIDS points to the plot using the add = TRUE argument
+plot(CENTROIDS, add=TRUE, col = "red")
+```
+
+2) Read the raster SRTM_30_BOGOTA_DC_CLIP.tif, name this raster SRTM_30.
+
+```{r}
+# creates a data frame called R_points from the CENTROIDS object, storing the longitude and latitude coordinates of the centroids
+R_points = data.frame(CENTROIDS)
+
+# assigns appropriate column names to the R_points data frame
+names(R_points) = c("Long","Lat")
+
+R_points
+
+# creates object for coordinate reference system (CRS) as WGS84
+WGS84 = CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+
+# creates a SpatialPointsDataFrame object from the R_points data frame 
+SPDF = SpatialPointsDataFrame(coords = R_points[,c("Long","Lat")], data = R_points, proj4string = WGS84)
+
+# loads a raster file into a RasterLayer object called SRTM_30
+SRTM_30 = raster("data/raster/SRTM_30_BOGOTA_DC_CLIP.tif")
+
+plot(SRTM_30)
+
+plot(SPDF, col="red", add=TRUE)
+
+```
+
+3) You must mask the SRTM_30 by each locality (LOCALIDADES) to estimate the sd of SRTM_30 by locality. 
+
+```{r}
+# creates buffer polygons around each point in the SPDF object using the gBuffer
+# function, with a buffer width of 0.01 (in the same units as the CRS)
+BUFFERS <- gBuffer(SPDF, width = 0.01, byid = TRUE)
+
+# plots the BUFFERS polygons
+plot(BUFFERS)
+```
+
+```{r}
+# adds a new column called "ID" to the BUFFERS object, 
+# assigning sequential IDs from 0 to 19
+BUFFERS$ID = seq(0, 19, 1)
+  
+head(BUFFERS)
+
+# masks the SRTM_30 raster with the BUFFERS polygons using the mask function, 
+# creating a new raster object called mask
+mask = mask(SRTM_30, BUFFERS)
+
+plot(mask)
+```
+
+```{r}
+# splits the BUFFERS object into subsets 
+# based on the unique values in the ID column
+SUBSETS <- split(BUFFERS, BUFFERS$ID)
+
+# applies anonymous function to SUBSETS list
+results <- sapply(SUBSETS, function(subset) {
+  mask_subset <- mask(SRTM_30, subset)
+  values_subset <- getValues(mask_subset)
+  sd_subset <- sd(values_subset, na.rm = TRUE) # excludes any missing values (NAs)
+  return(sd_subset)
+})
+
+# vector, which contains the standard deviations 
+# calculated for each subset in the SUBSETS list
+results
+
+```
+
+4) What is the locality with the highest topographic variability?
+
+Answer: Chapinero
+
+```{r}
+# Get the names of the localidades from the LOCALIDADES object
+localidades_names <- LOCALIDADES$Nombre_de_l
+
+# Combine the names and results vectors into a data frame
+results_df <- data.frame(localidades_names, results)
+
+# Order the data frame by the results column in descending order
+results_df <- results_df[order(results_df$results, decreasing = TRUE), ]
+
+# Give names to the columns
+colnames(results_df) <- c("Localidades", "Standard Deviation")
+
+# Print the ordered localidades names
+print(results_df)
+
+```
